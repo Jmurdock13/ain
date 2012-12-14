@@ -73,59 +73,6 @@ var releaseSocket = function () {
 
 }
 
-var Transport = {
-    UDP: function(message, severity) {
-        var client = dgram.createSocket('udp4');
-        var self = this;
-        var syslogMessage = this.composerFunction(message, severity);
-        client.send(syslogMessage,
-                    0,
-                    syslogMessage.length,
-                    this.port,
-                    this.address,
-                    function(err, bytes) {
-                      self._logError(err, bytes);
-                      client.close();
-                    }
-        );
-    },
-
-    file: (function() {
-        var logTarget ;
-
-        switch(require('os').type()) {
-            case 'Darwin': 
-            case 'FreeBSD':
-                logTarget = '/var/run/syslog' ;
-                break ;
-
-            case 'Linux':
-                logTarget = '/dev/log' ;
-                break ;
-            default:
-                logTarget = false ;
-                break ;
-        }
-
-        return function(message, severity) {
-            if (false === logTarget) {
-                throw new Error('Unknown OS Type: ' + require('os').type()) ;
-            }
-
-            var client = dgram.createSocket('unix_dgram') ;
-            var syslogMessage = this.composerFunction(message, severity);
-            client.send(syslogMessage,
-                        0,
-                        syslogMessage.length,
-                        logTarget,
-                        this._logError
-            );
-            client.close() ;
-
-        };
-    })()
-};
-
 var Facility = {
     kern:   0,
     user:   1,
@@ -227,14 +174,13 @@ SysLogger.getInstance = function() {
 };
 
 /**
- * Init function, takes a configuration object. If a hostname is provided the transport is assumed
+ * Init function, takes a configuration object.
  * to be Transport.UDP
  * @param {Object} configuration object with the following keys:
  *          - tag       - {String}                  By default is __filename
  *          - facility  - {Facility|Number|String}  By default is "user"
  *          - hostname  - {String}                  By default is require("os").hostname()
  *          - port      - {Number}                  Defaults to 514
- *          - transport - {Transport|String}        Defaults to Transport.UDP
  */
 SysLogger.prototype.set = function(config) {
     config = config || {} ;
@@ -244,20 +190,8 @@ SysLogger.prototype.set = function(config) {
     this.setHostname(config.hostname);
     this.setPort(config.port);
     this.setMessageComposer(config.messageComposer);
-    if (config.hostname) {
-        this.setTransport(Transport.UDP) ;
-    } else {
-        this.setTransport(config.transport) ;
-    }
+    this.client = dgram.createSocket('udp4');
 
-    return this;
-};
-
-SysLogger.prototype.setTransport = function(transport) {
-    this.transport = transport || Transport.UDP;
-    if (typeof this.transport == 'string') {
-        this.transport = Transport[this.transport] ;
-    }
     return this;
 };
 
@@ -298,7 +232,17 @@ SysLogger.prototype.setMessageComposer = function(composerFunction){
  * @param {Severity} severity
  */
 SysLogger.prototype._send = function(message, severity) {
-    this.transport(message, severity) ;
+    var self = this;
+    var syslogMessage = this.composerFunction(message, severity);
+    self.client.send(syslogMessage,
+        0,
+        syslogMessage.length,
+        this.port,
+        this.address,
+        function(err, bytes) {
+            self._logError(err, bytes);
+        }
+    );
 };
 
 /**
